@@ -226,24 +226,50 @@ static void service_listener(uint64_t, int32_t *types, void **payloads,
     }
   }
 }
+static bool service_candidate(ServiceSession &s, unsigned rank,
+                              int64_t expected, ServiceCandidate &candidate) {
+  std::lock_guard<std::mutex> lock(s.mutex);
+  const std::vector<ServiceCandidate> *candidates = &s.candidates;
+  if (expected >= 0) {
+    const auto snapshot = std::find_if(
+        s.published.begin(), s.published.end(), [expected](const auto &item) {
+          return item.revision == uint64_t(expected);
+        });
+    if (snapshot == s.published.end())
+      return false;
+    candidates = &snapshot->candidates;
+  }
+  if (rank >= candidates->size())
+    return false;
+  candidate = (*candidates)[rank];
+  return true;
+}
+static bool service_forget(ServiceSession &s, unsigned rank, int64_t expected) {
+  ServiceCandidate c;
+  // Only act on a candidate actually displayed by this client. A cloud
+  // update must never turn a delete shortcut into deletion of another word.
+  if (expected < 0 || s.vMode || !service_candidate(s, rank, expected, c))
+    return false;
+  // macOS 2.2.3.657 Engine.removeUserDictCandidate: session, UTF-8 text,
+  // byte length, candidate ID, ID length, true. The original core owns the
+  // persistent user block list and refreshes the current candidates.
+  using Fn = bool (*)(uint64_t, const char *, uint32_t, const void *, uint32_t,
+                      bool);
+  const bool accepted = ((Fn)syms.at("_wxime_add_word_to_user_block_list"))(
+      s.engine, c.text.data(), c.text.size(), c.id.data(), c.id.size(), true);
+  if (accepted) {
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.published.clear();
+  }
+  return accepted;
+}
 static bool service_select(ServiceSession &s, unsigned rank,
                            int64_t expected = -1) {
   ServiceCandidate c;
+  if (!service_candidate(s, rank, expected, c))
+    return false;
   {
     std::lock_guard<std::mutex> lock(s.mutex);
-    const std::vector<ServiceCandidate> *candidates = &s.candidates;
-    if (expected >= 0) {
-      const auto snapshot = std::find_if(
-          s.published.begin(), s.published.end(), [expected](const auto &item) {
-            return item.revision == uint64_t(expected);
-          });
-      if (snapshot == s.published.end())
-        return false;
-      candidates = &snapshot->candidates;
-    }
-    if (rank >= candidates->size())
-      return false;
-    c = (*candidates)[rank];
     s.published.clear();
   }
   using Fn = void (*)(uint64_t, const char *, uint32_t, const void *, uint32_t,
@@ -459,7 +485,7 @@ static void service_loop() {
         if (s.candidates.empty())
           op = "raw";
       }
-      if (op != "poll" && op != "open" && op != "select") {
+      if (op != "poll" && op != "open" && op != "select" && op != "forget") {
         std::lock_guard<std::mutex> lock(s.mutex);
         s.published.clear();
       }
@@ -586,6 +612,11 @@ static void service_loop() {
               "_wxime_reset_internal_cursor"))(
               s.engine, uint32_t(s.preedit.size() - s.cursor));
         }
+      } else if (op == "forget") {
+        auto expected = wire::number(request.get(), "revision", -1);
+        if (!service_forget(s, wire::number(request.get(), "index"), expected))
+          wire::put(response.get(), "error",
+                    std::string("candidate cannot be forgotten"));
       } else if (op == "select") {
         auto expected = wire::number(request.get(), "revision", -1);
         if (!service_select(s, wire::number(request.get(), "index"), expected))

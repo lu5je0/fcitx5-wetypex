@@ -319,11 +319,52 @@ def worker():
             assert press(ord("2"))
             wait_for(lambda: len(commits) == 5, "emoji candidate did not commit")
             assert commits[-1] == "😂", commits
+            # Forget the highlighted candidate, including on a later page.
+            # Deletion must not commit text or redraw the unchanged preedit.
+            assert not press(0xffff, 4), "idle Ctrl+Delete was consumed"
+            for char in "nihao":
+                assert press(ord(char))
+            wait_for(lambda: updates[-1] and updates[-1][0][1] == "你好",
+                     "forget test candidates never arrived")
+            original_first = updates[-1][0][1]
+            for later_page in (False, True):
+                if later_page:
+                    ic.NextPage()
+                    pump(.2)
+                target_index = next(i for i, (_, text) in enumerate(updates[-1])
+                                    if i > 0 and text.isalpha())
+                target = updates[-1][target_index][1]
+                assert target != original_first
+                for _ in range(target_index):
+                    assert press(0xff54)  # Down highlights the target word.
+                preedit_count = len(client_preedits)
+                assert press(0xffff, 4), "Ctrl+Delete was not consumed"
+                wait_for(lambda: updates[-1] and
+                         updates[-1][0][1] == original_first and
+                         all(text != target for _, text in updates[-1]),
+                         "highlighted candidate was not forgotten")
+                assert len(commits) == 5, "forget committed candidate text"
+                assert len(client_preedits) == preedit_count, "forget repainted preedit"
+                ic.Reset()
+                pump()
+                for char in "nihao":
+                    assert press(ord(char))
+                wait_for(lambda: updates[-1] and updates[-1][0][1] == original_first,
+                         "composition after forget failed")
+                if later_page:
+                    ic.NextPage()
+                    pump(.2)
+                assert all(text != target for _, text in updates[-1]), updates[-1]
+                if later_page:
+                    ic.PrevPage()
+                    pump(.2)
+            assert press(0xff1b)  # Escape
             if inline_preedit and pinned:
                 assert all(cursor == 0 for text, cursor in client_preedits if text)
             print("PASS:", "Kimpanel (including 中/英 status and click)" if kimpanel else "client UI",
                   "— Ctrl+b passthrough, six spaced labels, paging, Chinese commit,",
-                  "preedit anchor, raw cursor editing, single preedit update per edit, Unicode emoji")
+                  "preedit anchor, raw cursor editing, single preedit update per edit,",
+                  "Unicode emoji, Ctrl+Delete candidate forgetting")
             ic.DestroyIC()
         except Exception:
             log.seek(0)

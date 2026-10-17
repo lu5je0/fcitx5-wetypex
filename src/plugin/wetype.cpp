@@ -254,6 +254,7 @@ public:
       : CandidateWord(Text(text)), engine_(e), index_(index),
         revision_(revision) {}
   void select(InputContext *ic) const override;
+  bool forget(InputContext *ic) const;
 };
 class WeType : public InputMethodEngineV2 {
   Instance *instance_;
@@ -1290,7 +1291,8 @@ class WeType : public InputMethodEngineV2 {
     wire::put(json.get(), "session", int64_t(s->id));
     wire::put(json.get(), "seq", int64_t(++s->seq));
     if (std::string_view(op) == "key" || std::string_view(op) == "backspace" ||
-        std::string_view(op) == "delete" || std::string_view(op) == "move")
+        std::string_view(op) == "delete" || std::string_view(op) == "move" ||
+        std::string_view(op) == "forget")
       s->inputSeq = s->seq;
     wire::put(json.get(), "epoch", int64_t(s->epoch));
     wire::put(json.get(), "op", std::string(op));
@@ -1723,6 +1725,14 @@ public:
     }
     return false;
   }
+  bool forget(InputContext *ic, unsigned index, uint64_t revision) {
+    auto *s = state(ic);
+    if (s->selectionPending || !s->active || !ic->hasFocus() ||
+        s->preedit.empty() || s->vMode ||
+        ic->capabilityFlags().test(CapabilityFlag::Password))
+      return false;
+    return send(ic, "forget", "", index, revision);
+  }
   void keyEvent(const InputMethodEntry &, KeyEvent &e) override {
     auto key = e.key();
     auto *ic = e.inputContext();
@@ -1864,6 +1874,18 @@ public:
       s->fullWidth = !s->fullWidth;
       s->symbolAutoState = 0;
       e.filterAndAccept();
+      return;
+    }
+    if (!s->english && !s->preedit.empty() && !s->vMode &&
+        key.check(FcitxKey_Delete, KeyState::Ctrl)) {
+      auto candidates = ic->inputPanel().candidateList();
+      auto *list = dynamic_cast<CommonCandidateList *>(candidates.get());
+      if (list && list->size()) {
+        const auto *word = dynamic_cast<const Word *>(
+            &list->candidate(std::max(list->cursorIndex(), 0)));
+        if (word && word->forget(ic))
+          e.filterAndAccept();
+      }
       return;
     }
     if (key.states().test(KeyState::Ctrl) || key.states().test(KeyState::Alt) ||
@@ -2012,7 +2034,8 @@ public:
     }
     bool pageDown =
         sym == FcitxKey_Page_Down ||
-        key.checkKeyList(instance_->globalConfig().defaultNextPage()) ||
+        (sym != FcitxKey_Down &&
+         key.checkKeyList(instance_->globalConfig().defaultNextPage())) ||
         key.checkKeyList(*config_.shortcuts->nextPageKeys) ||
         (*config_.shortcuts->pageMinusEqual && sym == FcitxKey_equal) ||
         (*config_.shortcuts->pageBrackets && sym == FcitxKey_bracketright) ||
@@ -2021,7 +2044,8 @@ public:
          !key.states().test(KeyState::Shift) && sym == FcitxKey_Tab);
     bool pageUp =
         sym == FcitxKey_Page_Up ||
-        key.checkKeyList(instance_->globalConfig().defaultPrevPage()) ||
+        (sym != FcitxKey_Up &&
+         key.checkKeyList(instance_->globalConfig().defaultPrevPage())) ||
         key.checkKeyList(*config_.shortcuts->previousPageKeys) ||
         (*config_.shortcuts->pageMinusEqual && sym == FcitxKey_minus) ||
         (*config_.shortcuts->pageBrackets && sym == FcitxKey_bracketleft) ||
@@ -2214,6 +2238,9 @@ public:
 };
 void Word::select(InputContext *ic) const {
   engine_->select(ic, index_, revision_);
+}
+bool Word::forget(InputContext *ic) const {
+  return engine_->forget(ic, index_, revision_);
 }
 class Factory : public AddonFactory {
   AddonInstance *create(AddonManager *m) override {
