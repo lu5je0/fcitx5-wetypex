@@ -227,8 +227,8 @@ struct State : InputContextProperty {
   std::string pendingPairRight;
   uint8_t symbolAutoState = 0;
   bool doubleQuoteLeft = true, singleQuoteLeft = true;
-  bool english = false, fullWidth = false, traditional = false,
-       englishPunctuation = false, vMode = false;
+  bool fullWidth = false, traditional = false, englishPunctuation = false,
+       vMode = false;
   bool selectionPending = false;
   bool tmuxPrefixPending = false;
   KeySym forwardedKey = FcitxKey_None;
@@ -269,6 +269,7 @@ class WeType : public InputMethodEngineV2 {
   std::unique_ptr<EventSourceIO> reader_, writer_;
   std::unique_ptr<EventSourceTime> timer_;
   bool ready_ = false, failed_ = false;
+  bool english_ = false;
   uint64_t activity_ = 0;
   uint64_t restartAt_ = 0, restartBackoff_ = 250000;
   bool restartNeedsOpen_ = false;
@@ -1499,6 +1500,10 @@ public:
           return new State(++nextId_, ic);
         }) {
     reloadSettings();
+    // Language mode is shared across applications; defaults apply only when
+    // the engine starts, not when an input context is activated again.
+    english_ = *config_.input->defaultLanguage ==
+               wetype_config::DefaultLanguage::English;
     instance_->inputContextManager().registerProperty("wetypexState",
                                                       &factory_);
     focusOut_ = instance_->watchEvent(
@@ -1559,18 +1564,18 @@ public:
     }
   }
   const Configuration *getConfig() const override { return &config_; }
-  std::string subMode(const InputMethodEntry &, InputContext &ic) override {
-    return state(&ic)->english ? "英文" : "中文";
+  std::string subMode(const InputMethodEntry &, InputContext &) override {
+    return english_ ? "英文" : "中文";
   }
   std::string subModeLabelImpl(const InputMethodEntry &,
-                             InputContext &ic) override {
-    return state(&ic)->english ? "英" : "中";
+                             InputContext &) override {
+    return english_ ? "英" : "中";
   }
   std::string subModeIconImpl(const InputMethodEntry &,
-                            InputContext &ic) override {
+                            InputContext &) override {
     return std::string(WETYPE_STATUS_ICON_DIR) +
-           (state(&ic)->english ? "/fcitx5-wetypex-en-symbolic.svg"
-                               : "/fcitx5-wetypex-zh-symbolic.svg");
+           (english_ ? "/fcitx5-wetypex-en-symbolic.svg"
+                     : "/fcitx5-wetypex-zh-symbolic.svg");
   }
   const Configuration *
   getConfigForInputMethod(const InputMethodEntry &) const override {
@@ -1625,8 +1630,6 @@ public:
     auto *ic = e.inputContext();
     auto *current = state(ic);
     current->active = true;
-    current->english = *config_.input->defaultLanguage ==
-                       wetype_config::DefaultLanguage::English;
     current->traditional = false;
     ic->statusArea().addAction(StatusGroup::InputMethod, &settingsAction_);
     ic->updateUserInterface(UserInterfaceComponent::StatusArea);
@@ -1831,7 +1834,7 @@ public:
           clearDisplayState(s);
           ic->inputPanel().reset();
         }
-        s->english = !s->english;
+        english_ = !english_;
         s->symbolAutoState = 0;
         s->modifierCandidate = FcitxKey_None;
         if (commitPreedit)
@@ -1896,7 +1899,7 @@ public:
       e.filterAndAccept();
       return;
     }
-    if (!s->english && !s->preedit.empty() && !s->vMode &&
+    if (!english_ && !s->preedit.empty() && !s->vMode &&
         key.check(FcitxKey_Delete, KeyState::Ctrl)) {
       auto candidates = ic->inputPanel().candidateList();
       auto *list = dynamic_cast<CommonCandidateList *>(candidates.get());
@@ -1942,7 +1945,7 @@ public:
         }
       }
     }
-    if (s->english) {
+    if (english_) {
       if (sym >= 0x20 && sym <= 0x7e) {
         const char ascii = char(sym);
         const auto *entry = punctuationEntry(ascii);

@@ -32,6 +32,7 @@ def worker():
     inline_preedit = os.environ["WETYPEX_TEST_INLINE_PREEDIT"] == "1"
     pinned = os.environ["WETYPEX_TEST_PIN_PREEDIT"] == "1"
     text_icon = os.environ["WETYPEX_TEST_TEXT_ICON"] == "1"
+    default_english = os.environ["WETYPEX_TEST_DEFAULT_ENGLISH"] == "1"
     updates, preedits, commits, visible, properties = [], [], [], [], []
     client_preedits, panel_preedits, panel_cursors, spots = [], [], [], []
     client_preedit_formats = []
@@ -166,7 +167,8 @@ def worker():
 
                 wait_for(matches, f"panel did not show {label}: {properties[-4:]}")
 
-            check_status("中", "zh")
+            check_status("英" if default_english else "中",
+                         "en" if default_english else "zh")
 
             def key(sym, states=0, release=False, settle=True):
                 consumed = ic.ProcessKeyEvent(
@@ -185,6 +187,11 @@ def worker():
             def prefix():
                 assert not press(ord("b"), 4), "Ctrl+b was consumed"
                 assert not key(0xffe3, release=True), "Ctrl release was consumed"
+
+            if default_english:
+                assert not press(ord("a")), "English startup default was ignored"
+                press(0xffe1)
+                check_status("中", "zh")
 
             # The status badge follows the engine's language mode, including
             # panels that prefer labels and panels that use SVG icons.
@@ -443,10 +450,57 @@ def worker():
             check_status("中", "zh")
             if inline_preedit and pinned:
                 assert all(cursor == 0 for text, cursor in client_preedits if text)
+
+            # Language belongs to the engine, across reactivation, existing
+            # contexts, new fields in the same app and entirely new apps.
+            press(0xffe1)
+            controller.Deactivate()
+            controller.Activate()
+            assert not press(ord("a")), "reactivation reset the language"
+            check_status("英", "en")
+            ic.FocusOut()
+            ic.FocusIn()
+            assert not press(ord("a")), "refocusing reset the language"
+            check_status("英", "en")
+            original_ic = ic
+            for program in ("wetypex-synthetic-test", "wetypex-other-app"):
+                other_path, _ = method.CreateInputContext([("program", program)])
+                other_ic = dbus.Interface(
+                    bus.get_object("org.fcitx.Fcitx5", other_path), interface)
+                other_ic.SetCapability(dbus.UInt64(
+                    ((1 << 1) | (1 << 4) if inline_preedit else 0) |
+                    (0 if kimpanel else (1 << 39))))
+                ic.FocusOut()
+                ic = other_ic
+                ic.FocusIn()
+                controller.Activate()
+                controller.SetCurrentIM("wetypex")
+                assert not press(ord("a")), f"new context lost English: {program}"
+                check_status("英", "en")
+                press(0xffe1)
+                check_status("中", "zh")
+                assert press(ord("x")), "new context did not switch to Chinese"
+                ic.Reset()
+                pump()
+                ic.FocusOut()
+                ic = original_ic
+                ic.FocusIn()
+                controller.Activate()
+                controller.SetCurrentIM("wetypex")
+                assert press(ord("x")), "existing context kept stale English"
+                check_status("中", "zh")
+                ic.Reset()
+                pump()
+                press(0xffe1)
+                check_status("英", "en")
+                other_ic.DestroyIC()
+            press(0xffe1)
+            check_status("中", "zh")
             print("PASS:", "Kimpanel (including 中/英 status and click)" if kimpanel else "client UI",
                   "— Ctrl+b passthrough, six spaced labels, paging, Chinese commit,",
                   "preedit anchor, raw cursor editing, single preedit update per edit,",
-                  "Unicode emoji, Ctrl+Delete candidate forgetting, Shift raw commit")
+                  "Unicode emoji, Ctrl+Delete candidate forgetting, Shift raw commit,",
+                  "global language across applications and reactivation")
             ic.DestroyIC()
         except Exception:
             log.seek(0)
@@ -469,6 +523,7 @@ def main():
     parser.add_argument("--follow-cursor", action="store_true")
     parser.add_argument("--no-inline-preedit", action="store_true")
     parser.add_argument("--text-icon", action="store_true")
+    parser.add_argument("--default-english", action="store_true")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.worker:
@@ -491,6 +546,7 @@ def main():
         )
         (config / "wetypex.json").write_text(json.dumps({
             "standalone": True, "auto_update": False,
+            "default_language": "english" if args.default_english else "chinese",
             "preedit_cursor_at_beginning": not args.follow_cursor,
         }))
         if args.text_icon:
@@ -509,6 +565,7 @@ def main():
                    WETYPEX_TEST_INLINE_PREEDIT="0" if args.no_inline_preedit else "1",
                    WETYPEX_TEST_PIN_PREEDIT="0" if args.follow_cursor else "1",
                    WETYPEX_TEST_TEXT_ICON="1" if args.text_icon else "0",
+                   WETYPEX_TEST_DEFAULT_ENGLISH="1" if args.default_english else "0",
                    WETYPEX_TEST_KIMPANEL="1" if args.kimpanel else "0")
         subprocess.run(["dbus-run-session", "--", sys.executable, str(Path(__file__).resolve()),
                         "--worker"], env=env, timeout=60, check=True)
