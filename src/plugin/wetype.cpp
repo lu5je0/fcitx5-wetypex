@@ -1812,16 +1812,32 @@ public:
            configuredLanguageSwitch)) {
         if (s->vMode)
           cancelVMode(ic);
-        if (!s->preedit.empty())
-          send(ic, "reset");
-        s->preedit.clear();
-        s->cursor = 0;
-        clearDisplayState(s);
+        const bool commitPreedit = shiftModifier && !s->preedit.empty();
+        if (commitPreedit) {
+          // Let the backend commit after all preceding input/selection
+          // requests. Keep the client's composition until that reply, just
+          // as for candidate selection, and defer later keys until it lands.
+          if (!send(ic, "raw")) {
+            e.filterAndAccept();
+            return;
+          }
+          s->selectionPending = true;
+          ic->inputPanel().setCandidateList(nullptr);
+        } else {
+          if (!s->preedit.empty())
+            send(ic, "reset");
+          s->preedit.clear();
+          s->cursor = 0;
+          clearDisplayState(s);
+          ic->inputPanel().reset();
+        }
         s->english = !s->english;
         s->symbolAutoState = 0;
         s->modifierCandidate = FcitxKey_None;
-        ic->inputPanel().reset();
-        panel(ic, s);
+        if (commitPreedit)
+          ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+        else
+          panel(ic, s);
         ic->updateUserInterface(UserInterfaceComponent::StatusArea);
         e.filterAndAccept();
       }
@@ -1848,7 +1864,11 @@ public:
       return;
     }
     if (key.isModifier()) {
-      s->modifierCandidate = sym;
+      const bool shiftChord =
+          shiftModifier && (key.states().test(KeyState::Ctrl) ||
+                            key.states().test(KeyState::Alt) ||
+                            key.states().test(KeyState::Super));
+      s->modifierCandidate = shiftChord ? FcitxKey_None : sym;
       return;
     }
     s->modifierCandidate = FcitxKey_None;

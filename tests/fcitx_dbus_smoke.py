@@ -35,6 +35,7 @@ def worker():
     updates, preedits, commits, visible, properties = [], [], [], [], []
     client_preedits, panel_preedits, panel_cursors, spots = [], [], [], []
     client_preedit_formats = []
+    output_events, forwarded = [], []
     if kimpanel:
         class Panel(dbus.service.Object):
             @dbus.service.method("org.kde.impanel2", in_signature="asasasbbii")
@@ -111,6 +112,7 @@ def worker():
                 preedits.append(text)
                 client_preedits.append((text, int(cursor)))
                 client_preedit_formats.append([int(s[1]) for s in rows if str(s[0])])
+                output_events.append(("preedit", text))
                 # Model a client that positions its candidate window at the
                 # reported preedit caret, with fixed-width ASCII pinyin.
                 x = anchor[0] + (max(0, int(cursor)) * 9 if text else 0)
@@ -118,6 +120,7 @@ def worker():
 
             def committed(text):
                 commits.append(str(text))
+                output_events.append(("commit", str(text)))
                 anchor[0] += len(str(text)) * 18
                 ic.SetCursorRect(*anchor)
 
@@ -137,6 +140,8 @@ def worker():
             )
             bus.add_signal_receiver(committed,
                                     dbus_interface=interface, signal_name="CommitString", path=path)
+            bus.add_signal_receiver(lambda *args: forwarded.append(tuple(args)),
+                                    dbus_interface=interface, signal_name="ForwardKey", path=path)
             ic.FocusIn()
             controller.Activate()
             controller.SetCurrentIM("wetypex")
@@ -359,12 +364,89 @@ def worker():
                     ic.PrevPage()
                     pump(.2)
             assert press(0xff1b)  # Escape
+            # Bare Shift commits the original spelling, then switches to
+            # English. Automatic syllable separators are not committed.
+            for spelling, shift in (("nihao", 0xffe1), ("xi'an", 0xffe2)):
+                for char in spelling:
+                    assert press(ord(char))
+                count, event_begin = len(commits), len(output_events)
+                key(shift)
+                assert key(shift, 1, release=True), "bare Shift release was not consumed"
+                wait_for(lambda: len(commits) == count + 1, "Shift did not commit preedit")
+                assert commits[-1] == spelling, commits
+                check_status("英", "en")
+                if inline_preedit:
+                    events = output_events[event_begin:]
+                    assert ("preedit", "") not in events[:events.index(("commit", spelling))], events
+                press(shift)
+                check_status("中", "zh")
+
+            # A Shift chord must neither commit nor change language mode.
+            for char in "nihao":
+                assert press(ord(char))
+            count = len(commits)
+            for modifier in (4, 8, 64):  # Ctrl, Alt, Super
+                key(0xffe1, modifier)
+                key(0xffe1, modifier | 1, release=True)
+                assert len(commits) == count, "Shift chord committed preedit"
+                check_status("中", "zh")
+            assert press(0xff1b)
+
+            # Shift used for uppercase typing is not a bare Shift tap.
+            key(0xffe1)
+            assert press(ord("A"), 1)
+            key(0xffe1, 1, release=True)
+            assert len(commits) == count
+            assert press(ord("b"))
+            key(0xffe2)
+            assert press(ord("C"), 1)
+            key(0xffe2, 1, release=True)
+            assert len(commits) == count
+            check_status("中", "zh")
+            key(0xffe1)
+            assert key(0xffe1, release=True)
+            wait_for(lambda: len(commits) == count + 1, "mixed-case raw commit failed")
+            assert commits[-1] == "AbC", commits
+            press(0xffe1)
+            check_status("中", "zh")
+
+            # Preserve Chinese already selected within a longer composition.
+            for char in "nihaoshijie":
+                assert press(ord(char))
+            index = next(i for i, (_, text) in enumerate(updates[-1]) if text == "你好")
+            assert press(ord(str(index + 1)))
+            count = len(commits)
+            key(0xffe2)
+            assert key(0xffe2, release=True)
+            wait_for(lambda: len(commits) == count + 1, "partial selection was lost")
+            assert commits[-1] == "你好shijie", commits
+            press(0xffe2)
+            check_status("中", "zh")
+
+            # No waiting between typing, Shift, and the following English key.
+            count, forward_begin = len(commits), len(forwarded)
+            for char in "ceshi":
+                assert key(ord(char), settle=False)
+                key(ord(char), release=True, settle=False)
+            key(0xffe1, settle=False)
+            key(0xffe1, release=True, settle=False)
+            queued_english = key(ord("q"), settle=False)
+            key(ord("q"), release=True, settle=False)
+            wait_for(lambda: len(commits) == count + 1, "rapid Shift lost input")
+            assert commits[-1] == "ceshi", commits
+            if queued_english:
+                wait_for(lambda: any(int(args[0]) == ord("q") and not bool(args[-1])
+                                     for args in forwarded[forward_begin:]),
+                         "English key after Shift was not forwarded")
+            check_status("英", "en")
+            press(0xffe1)
+            check_status("中", "zh")
             if inline_preedit and pinned:
                 assert all(cursor == 0 for text, cursor in client_preedits if text)
             print("PASS:", "Kimpanel (including 中/英 status and click)" if kimpanel else "client UI",
                   "— Ctrl+b passthrough, six spaced labels, paging, Chinese commit,",
                   "preedit anchor, raw cursor editing, single preedit update per edit,",
-                  "Unicode emoji, Ctrl+Delete candidate forgetting")
+                  "Unicode emoji, Ctrl+Delete candidate forgetting, Shift raw commit")
             ic.DestroyIC()
         except Exception:
             log.seek(0)
