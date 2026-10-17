@@ -128,7 +128,7 @@ PY
     ;;
 esac
 
-runtime="${WETYPE_RUNTIME_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fcitx5-wetypex/runtime}"
+. "@CMAKE_INSTALL_FULL_DATADIR@/fcitx5-wetypex/runtime-path.sh"
 state="${WETYPE_ACCOUNT_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fcitx5-wetypex/account}"
 support="${WETYPE_SUPPORT_DIR:-@WETYPE_SUPPORT_DIR@}"
 test -f "$runtime/manifest.txt" || {
@@ -163,9 +163,8 @@ run_original() {
   # Pairing, settings and background sync share the same original account
   # database. Wait for the current short operation instead of surfacing an
   # intermittent failure when two callers overlap.
-  bwrap --unshare-pid --die-with-parent \
-      --ro-bind /usr /usr --symlink usr/lib /lib --ro-bind /lib64 /lib64 \
-      --symlink usr/bin /bin --proc /proc --dev /dev --tmpfs /tmp \
+  @CMAKE_INSTALL_FULL_BINDIR@/fcitx5-wetypex-bwrap --unshare-pid --die-with-parent \
+      --proc /proc --dev /dev --tmpfs /tmp \
       --dir /etc --ro-bind /etc/resolv.conf /etc/resolv.conf \
       --ro-bind /etc/hosts /etc/hosts \
       --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf \

@@ -2,13 +2,26 @@
 
 ## 源码边界
 
-正式源码包只包含 WeTypeX 自有代码、构建文件、文档和应用图标。以下内容不得进入源码包或二进制包：
+源码发布归档只包含 WeTypeX 自有代码、构建文件、文档、图标和运行时下载元数据。
+原版核心、词典、模型和界面资源作为独立 GitHub Release 资产发布，不进入 Git 历史或源码归档。
+账户身份、配对信息、用户词库、剪贴板和 AI 响应不得进入任何归档或软件包。
 
-- 原版可执行文件、动态库、输入词典和语言模型。
-- 从原版安装包提取的设置与 AI 界面资源。
-- 账户身份、配对信息、用户词库、剪贴板和 AI 响应。
+`tools/package_release.py` 会生成带固定 gzip 时间戳的归档与带散列的 Arch `PKGBUILD`。
+`runtime/NOTICE` 记录上游来源，`runtime/asset.json` 固定资产地址、压缩包 SHA-256 和解包后的 Nix 哈希。
+资源包内部的 `SHA256SUMS` 覆盖全部运行时与资源文件。更新资源时执行：
 
-`tools/package_release.py` 会生成带固定 gzip 时间戳的源码包与带散列的 Arch `PKGBUILD`，并拒绝不属于源码发行范围的二进制文件。
+```sh
+python3 tools/package_runtime.py --archive /path/to/WeType_2.2.3_657.zip
+sha256sum dist/runtime/*.tar.gz
+```
+
+将资源包、校验和与 NOTICE 上传到 fork 的独立 Release 后，更新 `runtime/asset.json`。
+资源标签使用 `runtime-...`，不会触发 `v*` 软件包发布工作流；已固定的资产不要覆盖，内容变化时发布新的修订。
+
+默认 CMake 下载并校验同一个资源包，将其中的 share 安装到包内。
+Nix 预先通过 `fetchzip` 获取资源，用 `-DWETYPE_RUNTIME_SOURCE_DIR=/path/to/unpacked-asset`
+传入解包目录，避免 CMake 在沙箱中联网。仅构建适配器时可指定
+`-DWETYPE_BUNDLE_RUNTIME=OFF`，再由用户另行准备运行时。
 
 ## 全部发布格式
 
@@ -49,20 +62,22 @@ makepkg -C -f --noconfirm
 - `CMakeLists.txt` 的 `project(... VERSION ...)`。
 - `packaging/PKGBUILD.in` 的 `pkgver`。
 - `tools/package_release.py` 的 `version`。
+- `nix/package.nix` 的 `version`。
 - 发布修订时同步更新 `packaging/PKGBUILD.in`、AUR `PKGBUILD` 的
   `pkgrel` 与 `packaging/nfpm.yaml` 的 `release`。
 - README 安装示例。
 
 ## 安装布局
 
-系统级软件文件安装到 `/usr`，用户运行时与状态始终写入 XDG 用户目录。软件包卸载不得删除用户账户、词库和配置。
+传统发行版的系统级软件文件安装到 `/usr`；Nix 包安装到独立的 store 前缀。
+Nix 构建与系统集成方式见 [Nix 安装](nix.md)。用户运行时与状态始终写入 XDG 用户目录。软件包卸载不得删除用户账户、词库和配置。
 
 ## 发布检查
 
 1. 分别在目标 Debian/Ubuntu、Fedora 和 Arch 构建环境完成 Release 构建。
-2. 检查软件包中没有原版运行时或账户数据。
+2. 检查源码包中没有原版运行时；二进制软件包包含固定运行时，且不包含账户数据。
 3. 检查所有脚本中的安装前缀已由 CMake 替换。
-4. 在新用户目录执行 `setup --archive` 和 `setup --check`。
+4. 在新用户目录执行 `setup --check` 验证包内运行时，再执行 `setup --bundled` 验证离线资源恢复；另行验证 `setup --archive`。
 5. 在真实 Fcitx5 会话验证全拼输入、候选选择和设置入口。
 6. 检查 deb、rpm、Arch 和便携归档的依赖与文件布局。
 7. 将 `dist/SHA256SUMS` 随 GitHub Release 一并发布。

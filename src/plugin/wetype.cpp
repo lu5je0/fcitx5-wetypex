@@ -31,6 +31,7 @@
 #include <iterator>
 #include <libime/pinyin/pinyinencoder.h>
 #include <map>
+#include <optional>
 #include <queue>
 #include <spawn.h>
 #include <string>
@@ -197,6 +198,15 @@ static size_t displayCursorForRaw(const std::string &raw,
     ++display;
   return display;
 }
+static bool sameText(const Text &left, const Text &right) {
+  if (left.cursor() != right.cursor() || left.size() != right.size())
+    return false;
+  for (size_t i = 0; i < left.size(); ++i)
+    if (left.stringAt(i) != right.stringAt(i) ||
+        left.formatAt(i) != right.formatAt(i))
+      return false;
+  return true;
+}
 class WeType;
 struct DeferredKey {
   Key key;
@@ -210,6 +220,7 @@ struct State : InputContextProperty {
   std::string preedit;
   size_t cursor = 0;
   std::string displayPreedit;
+  std::optional<Text> publishedPreedit;
   size_t displayCursor = 0, editableBegin = 0;
   std::vector<size_t> cursorStops;
   char pendingPairKey = 0;
@@ -219,6 +230,8 @@ struct State : InputContextProperty {
   bool english = false, fullWidth = false, traditional = false,
        englishPunctuation = false, vMode = false;
   bool selectionPending = false;
+  bool tmuxPrefixPending = false;
+  KeySym forwardedKey = FcitxKey_None;
   std::vector<DeferredKey> deferredKeys;
   bool active = false;
   KeySym modifierCandidate = FcitxKey_None;
@@ -242,12 +255,13 @@ public:
         revision_(revision) {}
   void select(InputContext *ic) const override;
 };
-class WeType : public InputMethodEngine {
+class WeType : public InputMethodEngineV2 {
   Instance *instance_;
   uint64_t nextId_ = 0;
   FactoryFor<State> factory_;
   SimpleAction settingsAction_;
   Connection settingsConnection_;
+  std::unique_ptr<HandlerTableEntry<EventHandler>> focusOut_;
   std::map<uint64_t, TrackableObjectReference<InputContext>> contexts_;
   pid_t child_ = -1;
   int read_ = -1, write_ = -1;
@@ -294,7 +308,7 @@ class WeType : public InputMethodEngine {
     }
     syncChild_ = -1;
   }
-  int pageSize_ = 5;
+  int pageSize_ = 6;
   int keyboard_ = 0;
   bool vertical_ = false, chinesePunctuation_ = true, slashPunctuation_ = true,
        symbolAutoChange_ = true, clipboardEnabled_ = false,
@@ -437,7 +451,7 @@ class WeType : public InputMethodEngine {
       auto *value = wire::get(j.get(), name);
       return value ? bool(json_object_get_boolean(value)) : fallback;
     };
-    pageSize_ = std::clamp(int(wire::number(j.get(), "page_size", 5)), 3, 9);
+    pageSize_ = std::clamp(int(wire::number(j.get(), "page_size", 6)), 3, 9);
     keyboard_ = wire::number(j.get(), "keyboard", 0) == 5 ? 5 : 0;
     vertical_ = json_object_get_boolean(wire::get(j.get(), "vertical"));
     auto *punctuation = wire::get(j.get(), "chinese_punctuation");
@@ -472,7 +486,7 @@ class WeType : public InputMethodEngine {
     input->emojiRecommend.setValue(
         !wire::get(j.get(), "emoji_recommend") ||
         json_object_get_boolean(wire::get(j.get(), "emoji_recommend")));
-    input->wechatEmoji.setValue(boolSetting("wechat_emoji", true));
+    input->wechatEmoji.setValue(boolSetting("wechat_emoji", false));
     input->normalEmoji.setValue(boolSetting("normal_emoji", true));
     input->kaomoji.setValue(boolSetting("kaomoji", true));
     input->largeEmoji.setValue(boolSetting("large_emoji", true));
@@ -534,6 +548,8 @@ class WeType : public InputMethodEngine {
     appearance->candidateSize.setValue(
         std::clamp(int(wire::number(j.get(), "candidate_size", 13)), 10, 18));
     appearance->vertical.setValue(vertical_);
+    appearance->preeditCursorAtBeginning.setValue(
+        boolSetting("preedit_cursor_at_beginning", true));
     appearance->theme.setValue(static_cast<wetype_config::ThemeMode>(
         std::clamp(int(wire::number(j.get(), "theme_mode", 0)), 0, 2)));
     auto *devices = config_.devices.mutableValue();
@@ -674,6 +690,8 @@ class WeType : public InputMethodEngine {
     wire::put(json.get(), "page_size", int64_t(*appearance.pageSize));
     wire::put(json.get(), "candidate_size", int64_t(*appearance.candidateSize));
     wire::put(json.get(), "vertical", bool(*appearance.vertical));
+    wire::put(json.get(), "preedit_cursor_at_beginning",
+              bool(*appearance.preeditCursorAtBeginning));
     wire::put(json.get(), "theme_mode", int64_t(*appearance.theme));
     wire::put(json.get(), "clipboard_enabled",
               bool(config_.phrases->clipboard.value()));
@@ -1059,7 +1077,24 @@ class WeType : public InputMethodEngine {
     const bool inlinePreedit =
         ic->capabilityFlags().test(CapabilityFlag::Preedit) &&
         ic->isPreeditEnabled();
-    ic->inputPanel().setClientPreedit(inlinePreedit ? text : Text());
+    Text clientText;
+    if (inlinePreedit && !displayed.empty()) {
+      // Match Rime's composing-text mode: underline the composition and
+      // highlight the converting portion when the client caret is pinned.
+      const bool pinned = *config_.appearance->preeditCursorAtBeginning;
+      const auto converted = pinned
+          ? displayCursorForRaw(s->preedit, displayed, s->editableBegin)
+          : displayed.size();
+      if (converted)
+        clientText.append(displayed.substr(0, converted),
+                          TextFormatFlag::Underline);
+      if (converted < displayed.size())
+        clientText.append(displayed.substr(converted),
+                          TextFormatFlags(TextFormatFlag::Underline) |
+                              TextFormatFlag::HighLight);
+      clientText.setCursor(pinned ? 0 : text.cursor());
+    }
+    ic->inputPanel().setClientPreedit(clientText);
     // Clients without inline preedit (including some terminal setups) need
     // to see the composition in the input panel.
     ic->inputPanel().setPreedit(inlinePreedit ? Text() : text);
@@ -1069,7 +1104,12 @@ class WeType : public InputMethodEngine {
     ic->inputPanel().setAuxDown(status);
     if (s->preedit.empty() && !s->vMode)
       ic->inputPanel().setCandidateList(nullptr);
-    ic->updatePreedit();
+    // Candidate-only replies and paging must not reset the client's preedit
+    // rendering/caret blink when text, formatting and cursor are unchanged.
+    if (!s->publishedPreedit || !sameText(*s->publishedPreedit, clientText)) {
+      s->publishedPreedit = clientText;
+      ic->updatePreedit();
+    }
     ic->updateUserInterface(UserInterfaceComponent::InputPanel);
   }
   void stop() {
@@ -1111,6 +1151,8 @@ class WeType : public InputMethodEngine {
         ++s->epoch;
         s->seq = s->applied = s->inputSeq = 0;
         s->selectionPending = false;
+        s->tmuxPrefixPending = false;
+        s->forwardedKey = FcitxKey_None;
         s->deferredKeys.clear();
         s->preedit.clear();
         s->cursor = 0;
@@ -1356,15 +1398,21 @@ class WeType : public InputMethodEngine {
     if (commits && json_object_is_type(commits, json_type_array))
       for (size_t i = 0; i < json_object_array_length(commits); i++) {
         auto *v = json_object_array_get_idx(commits, i);
-        if (json_object_is_type(v, json_type_string))
+        if (json_object_is_type(v, json_type_string)) {
           ic->commitString(json_object_get_string(v));
+          // A commit may clear the client's composition even when the core
+          // starts a new one with the same spelling (e.g. Wubi auto-commit).
+          s->publishedPreedit.reset();
+        }
       }
     auto cursorCommit = wire::str(j.get(), "cursor_commit");
     auto cursorCommitPosition =
         wire::number(j.get(), "cursor_commit_position", -1);
     if (!cursorCommit.empty() && cursorCommitPosition >= 0 &&
-        size_t(cursorCommitPosition) <= utf8::length(cursorCommit))
+        size_t(cursorCommitPosition) <= utf8::length(cursorCommit)) {
       commitStringAtCursor(ic, cursorCommit, size_t(cursorCommitPosition));
+      s->publishedPreedit.reset();
+    }
     if (seq != s->seq)
       return;
     s->selectionPending = false;
@@ -1396,9 +1444,12 @@ class WeType : public InputMethodEngine {
     auto list = std::make_unique<CommonCandidateList>();
     list->setPageSize(pageSize_);
     list->setCursorPositionAfterPaging(CursorPositionAfterPaging::ResetToFirst);
-    // The Windows candidate bar renders the page-local digit as part of each
-    // candidate ("1测试"), without Fcitx's default "1. 测试" label.
-    list->setSelectionKey({});
+    // Keep labels separate from candidate text: Kimpanel also uses a
+    // nonempty label to decide whether a candidate can be clicked.
+    std::vector<std::string> labels;
+    for (int i = 1; i <= pageSize_; ++i)
+      labels.push_back(std::to_string(i) + " ");
+    list->setLabels(labels);
     list->setLayoutHint(vertical_ ? CandidateLayoutHint::Vertical
                                   : CandidateLayoutHint::Horizontal);
     auto *candidates = wire::get(j.get(), "candidates");
@@ -1410,10 +1461,7 @@ class WeType : public InputMethodEngine {
         auto *v = json_object_array_get_idx(candidates, i);
         if (json_object_is_type(v, json_type_string) &&
             json_object_get_string_len(v)) {
-          std::string display =
-              std::to_string(list->totalSize() % pageSize_ + 1);
-          display += json_object_get_string(v);
-          list->append<Word>(this, std::move(display), i, s->revision);
+          list->append<Word>(this, json_object_get_string(v), i, s->revision);
         }
       }
     if (list->totalSize()) {
@@ -1451,8 +1499,16 @@ public:
     reloadSettings();
     instance_->inputContextManager().registerProperty("wetypexState",
                                                       &factory_);
+    focusOut_ = instance_->watchEvent(
+        EventType::InputContextFocusOut, EventWatcherPhase::PreInputMethod,
+        [this](Event &event) {
+          auto *ic = static_cast<InputContextEvent &>(event).inputContext();
+          auto *s = ic->propertyFor(&factory_);
+          s->tmuxPrefixPending = false;
+          s->forwardedKey = FcitxKey_None;
+        });
     settingsAction_.setShortText("WeTypeX 设置");
-    settingsAction_.setIcon("fcitx5-wetypex");
+    settingsAction_.setIcon(WETYPE_ICON);
     settingsAction_.registerAction("wetypex-settings",
                                    &instance_->userInterfaceManager());
     settingsConnection_ = settingsAction_.connect<SimpleAction::Activated>(
@@ -1501,6 +1557,19 @@ public:
     }
   }
   const Configuration *getConfig() const override { return &config_; }
+  std::string subMode(const InputMethodEntry &, InputContext &ic) override {
+    return state(&ic)->english ? "英文" : "中文";
+  }
+  std::string subModeLabelImpl(const InputMethodEntry &,
+                             InputContext &ic) override {
+    return state(&ic)->english ? "英" : "中";
+  }
+  std::string subModeIconImpl(const InputMethodEntry &,
+                            InputContext &ic) override {
+    return std::string(WETYPE_STATUS_ICON_DIR) +
+           (state(&ic)->english ? "/fcitx5-wetypex-en-symbolic.svg"
+                               : "/fcitx5-wetypex-zh-symbolic.svg");
+  }
   const Configuration *
   getConfigForInputMethod(const InputMethodEntry &) const override {
     return &config_;
@@ -1540,6 +1609,7 @@ public:
     }
   }
   ~WeType() override {
+    focusOut_.reset();
     timer_.reset();
     stop();
     stopSync();
@@ -1557,6 +1627,7 @@ public:
                        wetype_config::DefaultLanguage::English;
     current->traditional = false;
     ic->statusArea().addAction(StatusGroup::InputMethod, &settingsAction_);
+    ic->updateUserInterface(UserInterfaceComponent::StatusArea);
     if (ic->capabilityFlags().test(CapabilityFlag::Password))
       return;
     panel(ic, current);
@@ -1568,6 +1639,8 @@ public:
     if (vModeSession_ == s->id)
       stopVModeWindow();
     s->selectionPending = false;
+    s->tmuxPrefixPending = false;
+    s->forwardedKey = FcitxKey_None;
     s->deferredKeys.clear();
     ++s->epoch;
     s->preedit.clear();
@@ -1579,6 +1652,7 @@ public:
     s->vMode = false;
     s->cloudPollUntil = 0;
     ic->inputPanel().reset();
+    s->publishedPreedit = Text();
     if (child_ > 0)
       send(ic, "reset");
     ic->updatePreedit();
@@ -1612,7 +1686,7 @@ public:
     // clients (notably Perplexity) and can overwrite the later commit.
     // Hide the stale candidate list immediately; receive() will apply the
     // response's empty preedit and refresh the panel.
-    panel(ic, s);
+    ic->updateUserInterface(UserInterfaceComponent::InputPanel);
   }
   bool selectByKey(InputContext *ic, int pageIndex = -1) {
     auto *s = state(ic);
@@ -1656,6 +1730,30 @@ public:
     auto sym = key.sym();
     if (!s->active || ic->capabilityFlags().test(CapabilityFlag::Password))
       return;
+    // tmux consumes the key after Ctrl+b itself. Preserve the original
+    // press/release (and repeats) instead of starting a new composition.
+    if (sym == s->forwardedKey) {
+      if (e.isRelease())
+        s->forwardedKey = FcitxKey_None;
+      return;
+    }
+    if (!e.isRelease() && !key.isModifier())
+      s->forwardedKey = FcitxKey_None;
+    if (s->tmuxPrefixPending) {
+      s->modifierCandidate = FcitxKey_None;
+      if (!e.isRelease() && !key.isModifier()) {
+        s->tmuxPrefixPending = false;
+        s->forwardedKey = sym;
+      }
+      return;
+    }
+    if (!e.isRelease() && key.check(FcitxKey_B, KeyState::Ctrl) &&
+        s->preedit.empty() && !s->vMode) {
+      s->tmuxPrefixPending = true;
+      s->forwardedKey = sym;
+      s->modifierCandidate = FcitxKey_None;
+      return;
+    }
     // A later key must not operate on the preedit awaiting a select reply.
     // Re-enter normal event processing after that reply has committed it.
     if (s->selectionPending && sym != FcitxKey_Escape) {
@@ -1714,6 +1812,7 @@ public:
         s->modifierCandidate = FcitxKey_None;
         ic->inputPanel().reset();
         panel(ic, s);
+        ic->updateUserInterface(UserInterfaceComponent::StatusArea);
         e.filterAndAccept();
       }
       return;
@@ -1873,7 +1972,6 @@ public:
       ++s->cursor;
       clearDisplayState(s);
       send(ic, "key", text);
-      panel(ic, s);
       e.filterAndAccept();
       return;
     }
@@ -1908,7 +2006,6 @@ public:
         s->cursor = target;
         clearDisplayState(s);
         send(ic, "move", "", 0, -1, target);
-        panel(ic, s);
       }
       e.filterAndAccept();
       return;
@@ -1996,7 +2093,6 @@ public:
         clearDisplayState(s);
       }
       send(ic, "backspace");
-      panel(ic, s);
       e.filterAndAccept();
       return;
     }
@@ -2008,7 +2104,6 @@ public:
         s->preedit.erase(s->cursor, count);
         clearDisplayState(s);
         send(ic, "delete");
-        panel(ic, s);
       }
       e.filterAndAccept();
       return;
@@ -2110,7 +2205,9 @@ public:
       if ((lower || upper) && networkEnabled_)
         s->cloudPollUntil = now(CLOCK_MONOTONIC) + 1500000;
       send(ic, "key", text);
-      panel(ic, s);
+      // Keep the published composition until receive() applies the core's
+      // display text. A local spelling followed by a second backend repaint
+      // flickers, especially when their syllable separators differ.
       e.filterAndAccept();
     }
   }

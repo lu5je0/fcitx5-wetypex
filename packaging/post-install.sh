@@ -10,16 +10,12 @@ cat <<'EOF'
 
 WeTypeX 已安装。首次使用请依次执行：
 
-  1. 准备官方运行时（二选一）：
-     fcitx5-wetypex-setup --download --accept-upstream-license
-     fcitx5-wetypex-setup --archive /path/to/WeType_2.2.3_657.zip
-
-  2. 检查输入核心：
+  1. 检查包内输入核心（无需下载）：
      fcitx5-wetypex-setup --check
 
-  3. 打开 fcitx5-configtool，将 WeTypeX 添加到当前输入法列表。
+  2. 打开 fcitx5-configtool，将 WeTypeX 添加到当前输入法列表。
 
-  4. 重启 Fcitx5：
+  3. 重启 Fcitx5：
      fcitx5 -rd
 
 完整说明：https://github.com/panxuc/fcitx5-wetypex#首次设置

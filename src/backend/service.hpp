@@ -429,7 +429,9 @@ static void service_loop() {
         config[0x1e] = wire::number(request.get(), "fuzzy_an_ai", 0);
         config[0x1f] = wire::number(request.get(), "fuzzy_eng_ong", 0);
         if (wire::number(request.get(), "emoji_recommend", 1)) {
-          config[0x33] = wire::number(request.get(), "wechat_emoji", 1);
+          // WeChat-specific emoji are textual markers such as [破涕为笑].
+          // Prefer the core's Unicode emoji in ordinary Linux applications.
+          config[0x33] = wire::number(request.get(), "wechat_emoji", 0);
           config[0x34] = wire::number(request.get(), "normal_emoji", 1);
           config[0x35] = wire::number(request.get(), "kaomoji", 1);
           config[0x36] = wire::number(request.get(), "large_emoji", 1);

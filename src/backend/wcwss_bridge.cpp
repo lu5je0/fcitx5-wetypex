@@ -16,6 +16,10 @@
 #include <thread>
 #include <vector>
 
+#ifndef WETYPE_CA_BUNDLE
+#define WETYPE_CA_BUNDLE ""
+#endif
+
 namespace {
 using StringMap = std::map<std::string, std::string>;
 struct OpaqueConfig {
@@ -46,6 +50,11 @@ std::atomic<int> bridgeState{0}, bridgeError{-1};
 std::atomic<unsigned> bridgeSends{0}, bridgeReceives{0};
 std::once_flag curlInitialization;
 CURLcode curlInitializationResult = CURLE_FAILED_INIT;
+const char *caBundle() {
+  if (const char *path = getenv("SSL_CERT_FILE"); path && *path)
+    return path;
+  return WETYPE_CA_BUNDLE;
+}
 void initializeCurl() {
   std::call_once(curlInitialization, [] {
     curlInitializationResult = curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -139,6 +148,10 @@ void run(const std::shared_ptr<Connection> &connection) {
   curl_easy_setopt(curl, CURLOPT_HAPPY_EYEBALLS_TIMEOUT_MS, 200L);
   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+  // The sandbox clears the desktop environment. Nix OpenSSL has no usable
+  // system trust path there, so pass the packaged CA bundle explicitly.
+  if (const char *bundle = caBundle(); *bundle)
+    curl_easy_setopt(curl, CURLOPT_CAINFO, bundle);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 8000L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 12000L);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -371,6 +384,7 @@ extern "C" const char *wcwss_bridge_curl_provider() {
   return "system";
 #endif
 }
+extern "C" const char *wcwss_bridge_ca_bundle() { return caBundle(); }
 extern "C" unsigned wcwss_bridge_capabilities() {
   initializeCurl();
   const auto *version = curl_version_info(CURLVERSION_NOW);

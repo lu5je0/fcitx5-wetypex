@@ -30,6 +30,14 @@ QString dataRoot() {
   return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
          QStringLiteral("/fcitx5-wetypex");
 }
+QString runtimeRoot() {
+  if (qEnvironmentVariableIsSet("WETYPE_RUNTIME_DIR"))
+    return qEnvironmentVariable("WETYPE_RUNTIME_DIR");
+  const QString local = dataRoot() + QStringLiteral("/runtime");
+  return QFileInfo::exists(local + QStringLiteral("/manifest.txt"))
+             ? local
+             : QStringLiteral(WETYPE_BUNDLED_RUNTIME_DIR);
+}
 QString transferAsset(const QString &directory, const QString &name) {
   return QStandardPaths::locate(QStandardPaths::GenericDataLocation,
                                 QStringLiteral("fcitx5-wetypex/ui/") +
@@ -435,7 +443,7 @@ private:
   void startSession() {
     const QString root = dataRoot();
     const QString runtime = qEnvironmentVariable(
-        "WETYPE_FLURRY_RUNTIME", root + QStringLiteral("/runtime/flurry"));
+        "WETYPE_FLURRY_RUNTIME", runtimeRoot() + QStringLiteral("/flurry"));
     const QString host = qEnvironmentVariable(
         "WETYPE_ENGINE_HOST", QStringLiteral(WETYPE_ENGINE_HOST));
     const QString state = root + QStringLiteral("/state/transfer");
@@ -516,7 +524,7 @@ private:
     }
     sessionOutput_.clear();
     const QString runtime = qEnvironmentVariable(
-        "WETYPE_FLURRY_RUNTIME", root + QStringLiteral("/runtime/flurry"));
+        "WETYPE_FLURRY_RUNTIME", runtimeRoot() + QStringLiteral("/flurry"));
     const QString host = qEnvironmentVariable(
         "WETYPE_ENGINE_HOST", QStringLiteral(WETYPE_ENGINE_HOST));
     auto environment = session_.processEnvironment();

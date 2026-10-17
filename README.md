@@ -25,7 +25,7 @@
 >
 > 本项目并非由腾讯公司（Tencent）或其关联公司开发、维护或认可。本项目中提及的“微信输入法”及其相关商标、标识均为腾讯公司（Tencent）的注册商标或财产。本项目的存在不意味着与腾讯公司（Tencent）存在任何关联、合作关系，也不代表腾讯公司（Tencent）对本项目有任何形式的认可或背书。
 >
-> 本项目的开发者尊重他人的知识产权。本项目仅旨在实现技术上的兼容与互通，不包含、不复制、不传播任何微信输入法的专有代码、二进制文件或受版权保护的资源。用户在使用本项目的过程中，需自行获取并遵守微信输入法官方软件的使用条款与许可协议。任何单位或个人如认为本项目中包含的内容（包括但不限于代码、文档、配置信息等）可能涉嫌侵犯其合法权益（包括但不限于著作权、商标权、专利权等），请及时[联系项目维护者](mailto:panxuc@panxuc.com)。项目维护者在收到通知后，将在合理期限内移除、下架或断开被控侵权内容的访问链接。
+> 官方输入核心、词典和界面资源单独存放在 [GitHub Release](https://github.com/lu5je0/fcitx5-wetypex/releases/tag/runtime-2.2.3.657-r1)，不进入源码仓库。构建时按 [runtime/asset.json](runtime/asset.json) 固定的地址和哈希下载，其权利与使用条款仍归原权利人，不适用本项目的 MIT 许可证。上游来源见 [runtime/NOTICE](runtime/NOTICE)。
 >
 > 您使用本项目资料的风险完全由您自行承担。开发者不保证本项目资料的功能不会中断或没有错误，不保证缺陷会被修正，也不保证本项目资料兼容所有系统环境。
 
@@ -48,7 +48,7 @@
 
 ## 工作方式
 
-WeTypeX 安装程序从官方包中提取输入核心与词典，生成固定地址的 Linux 可加载映像；运行时由一个小型 Mach-O ABI 兼容宿主提供原版核心实际使用的 Darwin C/C++ 接口，并将网络传输接到 Linux 的 TLS 与 WebSocket 实现。
+WeTypeX 默认携带从固定官方包中提取的输入核心与词典，以及生成的 Linux 可加载映像；运行时由一个小型 Mach-O ABI 兼容宿主提供原版核心实际使用的 Darwin C/C++ 接口，并将网络传输接到 Linux 的 TLS 与 WebSocket 实现。
 
 ```text
 应用程序
@@ -108,6 +108,41 @@ FFmpeg 及部分桌面依赖可能来自发行版启用的附加软件仓库。
 
 RPM 以 Fedora 40 为构建基线。Arch 是滚动发行版，发布包跟随当前仓库；旧系统应保持库版本一致或在对应环境从源码构建。
 
+### Nix / NixOS
+
+支持 `x86_64-linux`，提供固定依赖的 `flake.nix` 和 `flake.lock`：
+
+```bash
+nix build path:.
+./result/bin/fcitx5-wetypex-setup --check
+```
+
+在 NixOS 系统 flake 中添加本项目输入，并跟随系统的 Nixpkgs：
+
+```nix
+inputs.wetypex = {
+  url = "path:/absolute/path/to/fcitx5-wetypex";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+通过 `specialArgs = { inherit inputs; };` 将输入传给系统模块后，配置：
+
+```nix
+{ inputs, pkgs, ... }: {
+  nixpkgs.overlays = [ inputs.wetypex.overlays.default ];
+  nixpkgs.config.allowUnfree = true;
+  i18n.inputMethod = {
+    enable = true;
+    type = "fcitx5";
+    fcitx5.addons = [ pkgs.fcitx5-wetypex ];
+  };
+}
+```
+
+重建系统后可直接使用包内运行时，在 Fcitx5 中添加 WeTypeX 即可。
+完整系统 flake 示例、Home Manager 和开发环境见 [Nix 安装](docs/nix.md)。
+
 ### 便携归档
 
 ```bash
@@ -130,7 +165,19 @@ sudo cmake --install build
 
 ## 首次设置
 
-准备官方运行时有两种方式。
+默认软件包已携带官方运行时，可直接检查：
+
+```bash
+fcitx5-wetypex-setup --check
+```
+
+如需恢复用户目录里的界面资源和主题（包括修复旧版复制的只读主题），可离线执行：
+
+```bash
+fcitx5-wetypex-setup --bundled
+```
+
+也可另行准备用户运行时。
 
 使用已经下载的官方安装包：
 
@@ -156,7 +203,7 @@ fcitx5-wetypex-setup --check
 fcitx5-remote -r
 ```
 
-配置、原版运行时、配对身份、词库和同步状态都位于用户目录，与 `/usr` 下的软件文件分离；正常升级不会重建账户。
+包内运行时保持只读；配置、配对身份、个人词库和同步状态写入用户目录，正常升级不会重建账户。
 
 ## 日常使用
 
@@ -185,10 +232,10 @@ fcitx5-wetypex-account sync-now     # 请求个人词库与常用语同步
 
 | 内容 | 默认位置 |
 | --- | --- |
-| 原版核心与词典 | `~/.local/share/fcitx5-wetypex/runtime` |
+| 原版核心与词典 | 包内 `share/fcitx5-wetypex/runtime`；存在用户 `~/.local/share/fcitx5-wetypex/runtime` 时优先使用 |
 | 账户身份与原版业务状态 | `~/.local/share/fcitx5-wetypex/account` |
 | 用户词库、常用语与同步状态 | `~/.local/share/fcitx5-wetypex/state` |
-| 从官方包提取的界面资源 | `~/.local/share/fcitx5-wetypex/ui` |
+| 从官方包提取的界面资源 | 包内 `share/fcitx5-wetypex/ui`；用户覆盖位于 `~/.local/share/fcitx5-wetypex/ui` |
 | WeTypeX 配置 | `~/.config/fcitx5/wetypex.json` |
 
 卸载系统软件包不会自动删除这些用户数据。需要重新配对时，可先备份后自行删除 `account` 与 `state/sync-state.json`；普通升级不应删除它们。

@@ -807,7 +807,7 @@ int main(int argc, char **argv) {
   auto *emojiSetup = new QPushButton("设置...");
   QObject::connect(emojiSetup, &QPushButton::clicked, [&window] {
     runToggleDialog(&window, "表情和颜文字推荐",
-                    {{"微信表情", "wechat_emoji", true},
+                    {{"微信表情文字", "wechat_emoji", false},
                      {"Emoji", "normal_emoji", true},
                      {"颜文字", "kaomoji", true},
                      {"大表情", "large_emoji", true},
@@ -1072,7 +1072,7 @@ int main(int argc, char **argv) {
   auto visual = page("外观", false);
   auto *preview =
       new QLabel("<span style='background:#13b77a;color:white;padding:5px'>1 "
-                 "输入</span>　2 输入法　3 诗心　4 为新　5 唯心");
+                 "输入</span>　2 输入法　3 诗心　4 为新　5 唯心　6 微信");
   preview->setAlignment(Qt::AlignCenter);
   preview->setFixedHeight(180);
   preview->setStyleSheet(
@@ -1103,6 +1103,12 @@ int main(int argc, char **argv) {
                                                                      : 1;
   theme->setCurrentIndex(themeMode);
   visual.body->addWidget(rowsCard({row("主题模式", {}, theme, 48)}));
+  visual.body->addWidget(rowsCard(
+      {row("候选框固定在拼音起始位置", "输入新字母时不跟随光标右移",
+           toggle(wetype::settingBool(settings.value("preedit_cursor_at_beginning"),
+                                      true),
+                  true, "preedit_cursor_at_beginning"),
+           64)}));
   auto *appearanceStatus = new QLabel;
   appearanceStatus->setObjectName("rowSubtitle");
   visual.body->addWidget(appearanceStatus);

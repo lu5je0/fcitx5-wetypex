@@ -1,0 +1,15 @@
+WeType 2.2.3.657 runtime and UI assets
+
+Source: https://download.weread.qq.com/app/wxkb/mac/2.2.3/WeType_2.2.3_657.zip
+Archive SHA-256: 8ef48bb21fe9d7b017b8a09fb9496b1b8f960ad960db27872226e08c09db264b
+
+The prepared input core, dictionaries, models and UI resources are distributed
+as a separate GitHub Release asset, not as part of the WeTypeX source tree.
+The runtime/asset.json file pins its URL and checksums. The asset's SHA256SUMS
+records every resource file. tools/package_runtime.py rebuilds the asset from
+the verified official archive or verifies an existing prepared resource tree.
+Executable mappings are prepared by tools/prepare_macos_runtime.py.
+
+These Tencent components remain proprietary and are not covered by the MIT
+license of the WeTypeX adapter. Their original software terms continue to apply.
+The WeTypeX project is unofficial and is not affiliated with Tencent.

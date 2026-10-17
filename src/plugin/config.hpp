@@ -47,7 +47,7 @@ FCITX_CONFIGURATION(
     Option<bool> smartInput{this, "SmartInput", "智能拼写", true};
     Option<bool> emojiRecommend{this, "EmojiRecommend", "表情和颜文字推荐",
                                 true};
-    Option<bool> wechatEmoji{this, "WechatEmoji", "微信表情推荐", true};
+    Option<bool> wechatEmoji{this, "WechatEmoji", "微信表情文字推荐", false};
     Option<bool> normalEmoji{this, "NormalEmoji", "Emoji 推荐", true};
     Option<bool> kaomoji{this, "Kaomoji", "颜文字推荐", true};
     Option<bool> largeEmoji{this, "LargeEmoji", "大表情推荐", true};
@@ -113,9 +113,11 @@ FCITX_CONFIGURATION(
     AppearanceConfig,
     Option<int, IntConstrain> candidateSize{this, "CandidateSize", "候选字大小",
                                             13, IntConstrain(10, 18)};
-    Option<int, IntConstrain> pageSize{this, "PageSize", "每页候选数", 5,
+    Option<int, IntConstrain> pageSize{this, "PageSize", "每页候选数", 6,
                                        IntConstrain(3, 9)};
     Option<bool> vertical{this, "Vertical", "候选词竖排", false};
+    Option<bool> preeditCursorAtBeginning{
+        this, "PreeditCursorPositionAtBeginning", "候选框固定在拼音起始位置", true};
     Option<ThemeMode> theme{this, "Theme", "主题模式", ThemeMode::System};)
 
 FCITX_CONFIGURATION(

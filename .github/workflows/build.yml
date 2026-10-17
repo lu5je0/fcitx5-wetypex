@@ -28,6 +28,8 @@ jobs:
           done
           python3 -m py_compile scripts/setup_runtime.py tools/*.py \
             build/fcitx5-wetypex-syncd build/fcitx5-wetypex-update build/fcitx5-wetypex-sync
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          (cd build/_deps/wetypex_runtime-src && sha256sum --check --quiet SHA256SUMS)
       - name: 构建 Arch 软件包（启用 LTO）
         run: |
           python3 tools/package_release.py

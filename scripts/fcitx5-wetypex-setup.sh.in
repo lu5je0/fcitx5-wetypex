@@ -1,3 +1,5 @@
 #!/bin/sh
 export WETYPE_SUPPORT_DIR="${WETYPE_SUPPORT_DIR:-@WETYPE_SUPPORT_DIR@}"
+export WETYPE_BWRAP="@CMAKE_INSTALL_FULL_BINDIR@/fcitx5-wetypex-bwrap"
+export WETYPE_DATA_DIR="@CMAKE_INSTALL_FULL_DATADIR@"
 exec "${WETYPE_PYTHON:-python3}" "@CMAKE_INSTALL_FULL_DATADIR@/fcitx5-wetypex/setup_runtime.py" "$@"

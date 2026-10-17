@@ -1,8 +1,8 @@
 [InputMethod]
 Name=WeTypeX
 Name[zh_CN]=WeTypeX
-Icon=fcitx5-wetypex
-Label=
+Icon=@WETYPE_ICON@
+Label=中
 LangCode=zh_CN
 Addon=wetypex
 Configurable=True

@@ -1,0 +1,6 @@
+# Shared by the backend, account and AI launchers.
+runtime="${WETYPE_RUNTIME_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fcitx5-wetypex/runtime}"
+if [ -z "${WETYPE_RUNTIME_DIR:-}" ] && [ ! -f "$runtime/manifest.txt" ] && \
+   [ -f "@CMAKE_INSTALL_FULL_DATADIR@/fcitx5-wetypex/runtime/manifest.txt" ]; then
+  runtime="@CMAKE_INSTALL_FULL_DATADIR@/fcitx5-wetypex/runtime"
+fi

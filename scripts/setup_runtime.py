@@ -22,19 +22,49 @@ ENGINE_SHA='a68a92300cc38e5941f59832c516a37eb098c10c6bbe47ab3dcbe812705cf5ee'
 FLURRY_SHA='4c97f45b03c511bf0611c7ccc39537b370b4dfba6ba3ba1ba4d9a42e4b6bbd39'
 WXP2P_SHA='f99240391cbbb45c8162c9661ec1c7c3932aac53e4c674260b2be1cfcea963d6'
 
+def copy_user_tree(source, target):
+    """Copy packaged data without inheriting read-only store permissions."""
+    if target.is_symlink():target.unlink()
+    target.mkdir(parents=True,exist_ok=True)
+    target.chmod(target.stat().st_mode | 0o700)
+    for original in source.iterdir():
+        destination=target/original.name
+        if original.is_dir():
+            copy_user_tree(original,destination)
+            continue
+        temporary=None
+        try:
+            with original.open('rb') as incoming,tempfile.NamedTemporaryFile(dir=target,delete=False) as outgoing:
+                temporary=pathlib.Path(outgoing.name)
+                shutil.copyfileobj(incoming,outgoing)
+            temporary.replace(destination)
+        finally:
+            if temporary is not None:temporary.unlink(missing_ok=True)
+
+def installed_data():
+    return pathlib.Path(os.environ.get('WETYPE_DATA_DIR','/usr/share'))
+
+def default_runtime(data):
+    if os.environ.get('WETYPE_RUNTIME_DIR'):
+        return pathlib.Path(os.environ['WETYPE_RUNTIME_DIR'])
+    local=data/'fcitx5-wetypex/runtime'
+    if (local/'manifest.txt').is_file():return local
+    bundled=installed_data()/'fcitx5-wetypex/runtime'
+    return bundled if (bundled/'manifest.txt').is_file() else local
+
 def install_ui_resources(archive, data):
     """Install verified original UI assets in user data; WeTypeX keeps its own icon."""
     prefix='WeType.app/Contents/MacOS/WeTypeSettings.app/Contents/Frameworks/App.framework/Versions/A/Resources/flutter_assets/assets/modules/'
     with zipfile.ZipFile(archive) as z:
         assets={}
         system_theme_root=next((path for path in (
+            pathlib.Path(os.environ.get('WETYPE_DATA_DIR','/usr/share'))/'fcitx5/themes',
             pathlib.Path('/usr/share/fcitx5/themes'),
             pathlib.Path('/usr/local/share/fcitx5/themes'))
             if (path/'wetypex-light/theme.conf').is_file()),None)
         if system_theme_root:
             for theme in ('wetypex-light','wetypex-dark'):
-                shutil.copytree(system_theme_root/theme,
-                                data/'fcitx5/themes'/theme,dirs_exist_ok=True)
+                copy_user_tree(system_theme_root/theme,data/'fcitx5/themes'/theme)
         for name, original in {'input':'icon_setup_sidebar_keyboard.svg',
                                'voice':'icon_setup_sidebar_microphone.svg',
                                'phrases':'icon_setup_sidebar_changyongyu.svg',
@@ -138,13 +168,11 @@ def validate_runtime(target):
     required=[host,locale,support/'libkqueue.so',support/'wcwss_bridge.so']
     if any(not path.exists() for path in required):
         return False,'WeTypeX engine host is not installed'
-    bwrap=shutil.which('bwrap')
+    bwrap=os.environ.get('WETYPE_BWRAP') or shutil.which('fcitx5-wetypex-bwrap')
     if not bwrap:
-        return False,'bubblewrap is not installed'
+        return False,'WeTypeX sandbox launcher is not installed'
     with tempfile.TemporaryDirectory(prefix='.wetypex-check-') as work:
         command=[bwrap,'--unshare-net','--unshare-pid','--die-with-parent',
-                 '--ro-bind','/usr','/usr','--symlink','usr/lib','/lib',
-                 '--ro-bind','/lib64','/lib64','--symlink','usr/bin','/bin',
                  '--proc','/proc','--dev','/dev','--tmpfs','/tmp',
                  '--ro-bind',str(target),'/input','--ro-bind',str(support),'/support',
                  '--bind',work,'/work','--chdir','/work','--clearenv',
@@ -204,10 +232,11 @@ def main():
     ap.add_argument('--accept-upstream-license',action='store_true',help='Confirm acceptance of the upstream license before downloading')
     ap.add_argument('--check',action='store_true')
     ap.add_argument('--icons-only',action='store_true',help='Install original icons from the verified archive without replacing the engine')
+    ap.add_argument('--bundled',action='store_true',help='Use the runtime and UI resources shipped with this package (offline)')
     ap.add_argument('--runtime-dir',type=pathlib.Path)
     args=ap.parse_args()
     data=pathlib.Path(os.environ.get('XDG_DATA_HOME',str(pathlib.Path.home()/'.local/share')))
-    target=args.runtime_dir or pathlib.Path(os.environ.get('WETYPE_RUNTIME_DIR',str(data/'fcitx5-wetypex/runtime')))
+    target=args.runtime_dir or default_runtime(data)
     if platform.system()!='Linux' or platform.machine()!='x86_64':ap.error('WeTypeX supports Linux x86-64 only')
     if args.check:
         required=['image.macho','manifest.txt','symbols.txt','dicts.txt','resources/index.json','runtime.json',
@@ -215,6 +244,7 @@ def main():
                   'wxp2p/image.macho','wxp2p/manifest.txt']
         missing=[name for name in required if not (target/name).is_file()]
         ui=data/'fcitx5-wetypex/ui'
+        packaged_ui=installed_data()/'fcitx5-wetypex/ui'
         ui_required=['icons/input.svg','icons/icon_windows_close_btn.svg',
                      'icons/voice.svg','icons/phrases.svg','icons/appearance.svg',
                      'icons/shortcuts.svg','icons/devices.svg','icons/mobile.svg',
@@ -241,12 +271,12 @@ def main():
                      'transfer-icons/icon_filetype_general.svg',
                      'transfer-icons/icon_filetype_folder.svg',
                      'transfer-images/img_connection_pc_to_phone.png']
-        missing_ui=[name for name in ui_required if not (ui/name).is_file()]
+        missing_ui=[name for name in ui_required if not any((root/name).is_file() for root in (ui,packaged_ui))]
         for name in ('fcitx5/themes/wetypex-light/next.svg',
                      'fcitx5/themes/wetypex-light/prev.svg',
                      'fcitx5/themes/wetypex-dark/next.svg',
                      'fcitx5/themes/wetypex-dark/prev.svg'):
-            if not (data/name).is_file():missing_ui.append(name)
+            if not any((root/name).is_file() for root in (data,installed_data())):missing_ui.append(name)
         core_ready,core_error=(False,'runtime files are incomplete') if missing else validate_runtime(target)
         runtime_version=''
         try:runtime_version=json.loads((target/'runtime.json').read_text()).get('version','')
@@ -259,10 +289,23 @@ def main():
                           'core_ready':core_ready,'core_error':core_error},
                          ensure_ascii=False,indent=2))
         return 1 if missing or missing_ui or not core_ready else 0
-    if not args.archive and not args.download:ap.error('Supply --archive FILE or explicitly request --download')
+    if sum(bool(value) for value in (args.bundled,args.archive,args.download))>1:ap.error('Choose one source')
+    if args.bundled or (not args.archive and not args.download):
+        bundled=installed_data()/'fcitx5-wetypex'
+        if not (bundled/'runtime/manifest.txt').is_file():
+            ap.error('No bundled runtime; supply --archive FILE or explicitly request --download')
+        copy_user_tree(bundled/'ui',data/'fcitx5-wetypex/ui')
+        for theme in ('wetypex-light','wetypex-dark'):
+            copy_user_tree(installed_data()/'fcitx5/themes'/theme,data/'fcitx5/themes'/theme)
+        if args.runtime_dir or os.environ.get('WETYPE_RUNTIME_DIR'):
+            if target.resolve()!=(bundled/'runtime').resolve():copy_user_tree(bundled/'runtime',target)
+        print('Original runtime available: '+str(target))
+        return 0
     if args.archive and args.download:ap.error('Choose one source')
     if args.download and not args.accept_upstream_license:
         ap.error('--download requires --accept-upstream-license; alternatively supply an existing --archive file')
+    # Explicit archive/download installs always write to user data, never store.
+    target=args.runtime_dir or pathlib.Path(os.environ.get('WETYPE_RUNTIME_DIR',str(data/'fcitx5-wetypex/runtime')))
     target.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.wetype-setup-',dir=target.parent) as temporary:
         temp=pathlib.Path(temporary)

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+# Keep the engine sandbox's filesystem layout in one place. Nix binaries use
+# store paths for their ELF interpreter and libraries instead of /usr/lib.
+nix_store="@WETYPE_NIX_STORE@"
+if [ -n "$nix_store" ]; then
+  exec bwrap --ro-bind "$nix_store" "$nix_store" "$@"
+fi
+exec bwrap --ro-bind /usr /usr --symlink usr/lib /lib \
+  --ro-bind /lib64 /lib64 --symlink usr/bin /bin "$@"

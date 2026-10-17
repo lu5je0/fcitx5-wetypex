@@ -17,16 +17,88 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/fcitx5/wetypex.json
 - 模糊拼音：原版 19 组模糊音可独立开关。
 - 单机模式：禁止云候选和设备同步相关联网。
 
+默认推荐标准 Unicode Emoji，例如输入 `hhh` 会出现 😂。
+“微信表情文字”默认关闭；手动开启后，原版核心会优先推荐 `[破涕为笑]`
+等微信专用文字标记，适合需要这些标记的聊天场景。
+
+## 模糊音设置
+
+运行 `fcitx5-wetypex-settings`，在“输入”页面找到“模糊拼音”，点击“设置...”后分别勾选需要的音组。也可以在 Fcitx5 配置工具中选中 WeTypeX，打开其配置页。默认 19 组全部关闭，图形设置保存后会自动重载插件。
+
+手工编辑 `wetypex.json` 时，这些开关都位于 JSON 顶层，使用布尔值。将需要的项合并到现有配置，例如：
+
+```json
+{
+  "fuzzy_nl": true,
+  "fuzzy_z_zh": true,
+  "fuzzy_c_ch": true,
+  "fuzzy_s_sh": true,
+  "fuzzy_in_ing": true,
+  "fuzzy_en_eng": true
+}
+```
+
+手动修改前备份配置，修改后重新加载或重启 Fcitx5。
+
+| 音组 | JSON 键 |
+| --- | --- |
+| n/l | `fuzzy_nl` |
+| r/l | `fuzzy_rl` |
+| h/f | `fuzzy_hf` |
+| g/k | `fuzzy_gk` |
+| an/ang | `fuzzy_an_ang` |
+| ian/iang | `fuzzy_ian_iang` |
+| uan/uang | `fuzzy_uan_uang` |
+| c/ch | `fuzzy_c_ch` |
+| s/sh | `fuzzy_s_sh` |
+| z/zh | `fuzzy_z_zh` |
+| hui/fei | `fuzzy_hui_fei` |
+| en/eng | `fuzzy_en_eng` |
+| in/ing | `fuzzy_in_ing` |
+| on/ong | `fuzzy_on_ong` |
+| huang/wang | `fuzzy_huang_wang` |
+| un/ong | `fuzzy_un_ong` |
+| un/iong | `fuzzy_un_iong` |
+| an/ai | `fuzzy_an_ai` |
+| eng/ong | `fuzzy_eng_ong` |
+
+## 配置与数据位置
+
+以下为未设置 XDG 环境变量时的默认位置：
+
+| 内容 | 位置 |
+| --- | --- |
+| WeTypeX 全部输入、模糊音与快捷键设置 | `~/.config/fcitx5/wetypex.json` |
+| Fcitx5 已添加的输入法与分组 | `~/.config/fcitx5/profile` |
+| Fcitx5 全局设置 | `~/.config/fcitx5/config` |
+| 候选窗外观 | `~/.config/fcitx5/conf/classicui.conf` |
+| 账户身份与配对状态 | `~/.local/share/fcitx5-wetypex/account/` |
+| 个人词库、常用语与同步状态 | `~/.local/share/fcitx5-wetypex/state/` |
+| 用户覆盖的运行时 | `~/.local/share/fcitx5-wetypex/runtime/` |
+| 用户覆盖的界面资源与主题 | `~/.local/share/fcitx5-wetypex/ui/`、`~/.local/share/fcitx5/themes/wetypex-*/` |
+| AI、语音临时数据 | `~/.local/share/fcitx5-wetypex/ai/`、`~/.local/share/fcitx5-wetypex/state/voice/` |
+| 更新缓存 | `~/.cache/fcitx5-wetypex/updates/` |
+
+Nix profile 安装的默认核心、词典和界面资源可从
+`~/.nix-profile/share/fcitx5-wetypex/{runtime,ui}/` 访问，实际位于 `/nix/store`。
+源码中的 `runtime/asset.json` 只记录独立 Release 资源包的地址和校验和；资源在构建时下载，个人配置和词库不会写入这些只读资源。
+设置 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 或 `XDG_CACHE_HOME` 后，上述用户目录随之变化。
+
 ## 外观
 
 - 候选字号：10–18。
-- 每页候选：3–9。
+- 每页候选：3–9，默认 6 个；编号与候选词之间保留一个空格。
 - 排列方式：横排或竖排。
+- 候选框固定在拼音起始位置：默认开启，同一轮拼音追加字母时不向右移动；
+  在“外观”页关闭后恢复跟随光标，也可将 `preedit_cursor_at_beginning` 设为 `false`。
 - 主题：跟随系统、浅色、深色。
 
 外观设置会更新 Fcitx5 Classic UI 的 WeTypeX 主题项。其他输入法共用同一个 Classic UI 时，主题切换也会影响其候选窗口。
 
 ## 快捷键
+
+未在组字时，`Ctrl+b` 及随后的一次按键直接传给应用，支持 tmux 的
+`Ctrl+b` → `x` 等前缀命令；命令键释放后恢复正常输入。切换输入框或重置输入法会清除待处理的前缀。
 
 快捷键使用 Fcitx5 原生 `Key` / `List|Key` 类型，可在系统配置页直接捕获。默认值包括：
 

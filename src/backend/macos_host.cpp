@@ -2855,12 +2855,15 @@ int main(int argc, char **argv) {
         dlsym(RTLD_DEFAULT, "wcwss_bridge_curl_provider"));
     auto capabilities = reinterpret_cast<unsigned (*)()>(
         dlsym(RTLD_DEFAULT, "wcwss_bridge_capabilities"));
-    if (!version || !provider || !capabilities)
+    auto caBundle = reinterpret_cast<const char *(*)()>(
+        dlsym(RTLD_DEFAULT, "wcwss_bridge_ca_bundle"));
+    if (!version || !provider || !capabilities || !caBundle)
       return 2;
     const auto flags = capabilities();
     auto report = wire::object();
     wire::put(report.get(), "libcurl_version", std::string(version()));
     wire::put(report.get(), "provider", std::string(provider()));
+    wire::put(report.get(), "ca_bundle", std::string(caBundle()));
     wire::boolean(report.get(), "ws", flags & 1);
     wire::boolean(report.get(), "wss", flags & 2);
     wire::boolean(report.get(), "ipv6", flags & 4);
