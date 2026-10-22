@@ -1458,9 +1458,7 @@ class WeType : public InputMethodEngineV2 {
     auto *candidates = wire::get(j.get(), "candidates");
     if ((!s->preedit.empty() || s->vMode) && candidates &&
         json_object_is_type(candidates, json_type_array))
-      for (size_t i = 0;
-           i < std::min(size_t(50), json_object_array_length(candidates));
-           i++) {
+      for (size_t i = 0; i < json_object_array_length(candidates); i++) {
         auto *v = json_object_array_get_idx(candidates, i);
         if (json_object_is_type(v, json_type_string) &&
             json_object_get_string_len(v)) {

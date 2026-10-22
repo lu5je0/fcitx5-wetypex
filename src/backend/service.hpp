@@ -111,7 +111,10 @@ static void configure_cloud_session(unsigned char *config) {
 static void read_service_candidates(void *iterator,
                                     std::vector<ServiceCandidate> &output) {
   output.clear();
-  for (unsigned rank = 0; iterator && rank < 50; rank++) {
+  // The iterator owns the full ranked list, including single-character
+  // fallbacks after phrase candidates. Read it to exhaustion so paging can
+  // reach those fallbacks regardless of their rank.
+  while (iterator) {
     alignas(16) unsigned char c[512]{};
     if (!((bool (*)(void *, void *))syms.at("_wxime_candidate_next"))(iterator,
                                                                       c))

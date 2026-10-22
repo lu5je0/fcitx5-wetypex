@@ -41,9 +41,11 @@ python3 tests/fcitx_dbus_smoke.py --package ./result --kimpanel --text-icon
 python3 tests/fcitx_dbus_smoke.py --package ./result --follow-cursor
 python3 tests/fcitx_dbus_smoke.py --package ./result --kimpanel --no-inline-preedit
 python3 tests/backend_forget_smoke.py --package ./result
+python3 tests/backend_candidates_smoke.py --package ./result
 ```
 
 脚本创建临时 HOME 和独立 D-Bus，只发送固定测试文本，不连接桌面输入会话。
 检查候选编号空格、默认 6 个候选、翻页、选词上屏、面板图标，以及 tmux 前缀按键透传。
 同时检查拼音起点锚定、关闭锚定、无内嵌预编辑的候选窗，以及固定定位点后的方向键和退格编辑。
 删词检查覆盖高亮候选、翻页、错误快照保护、学习词删除和进程重启后的持久化；词库均在临时目录中。
+候选检查覆盖 `yi`、`yixuan` 的完整候选列表，第 50 个之后的翻页与选择（包括 `ji` 的“齑”），以及部分选字后继续输入；同时检查“螫、鱻、驫、龘、齉、靐、麤、犇”等生僻字。

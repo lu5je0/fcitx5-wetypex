@@ -496,11 +496,56 @@ def worker():
                 other_ic.DestroyIC()
             press(0xffe1)
             check_status("中", "zh")
+            # Single-character fallbacks after rank 50 must remain reachable
+            # through the UI, including after phrase candidates for yixuan.
+            for spelling, target in (("yi", "羿"), ("yixuan", "翊"), ("ji", "齑")):
+                for char in spelling:
+                    assert press(ord(char))
+                pump(.1)
+                preedit_count = len(client_preedits)
+                visited = set()
+                for _ in range(100):
+                    page = tuple(updates[-1])
+                    if any(text == target for _, text in page):
+                        break
+                    assert page and page not in visited, (
+                        "candidate list stopped before late fallback", spelling, target, page)
+                    visited.add(page)
+                    assert press(0xff56)  # PageDown
+                else:
+                    raise AssertionError(("late fallback not found", spelling, target))
+                assert len(visited) >= 8, (spelling, visited)
+                later = updates[-1]
+                assert press(0xff55)  # PageUp
+                assert updates[-1] != later, "previous late page not delivered"
+                assert press(0xff56)
+                assert updates[-1] == later, "late page not restored"
+                assert len(client_preedits) == preedit_count, "late paging repainted preedit"
+                # Up/Down also cross the page boundary at these late ranks.
+                assert press(0xff52)  # Up from the first candidate
+                assert updates[-1] != later, "Up did not cross the late page boundary"
+                assert press(0xff54)  # Down back to the next page
+                assert updates[-1] == later, "Down did not restore the late page"
+                index = next(i for i, (_, text) in enumerate(later) if text == target)
+                count = len(commits)
+                if kimpanel:
+                    panel.SelectCandidate(index)
+                else:
+                    assert press(ord(str(index + 1)))
+                if spelling == "yixuan":
+                    wait_for(lambda: (client_preedits[-1][0] if inline_preedit
+                                      else panel_preedits[-1]) == target + "xuan",
+                             "late partial selection lost remaining pinyin")
+                    assert len(commits) == count, "partial selection committed early"
+                    assert press(0xff0d)  # Return commits selected text and raw xuan
+                wait_for(lambda: len(commits) == count + 1, "late candidate did not commit")
+                assert commits[-1] == target + ("xuan" if spelling == "yixuan" else ""), commits
             print("PASS:", "Kimpanel (including 中/英 status and click)" if kimpanel else "client UI",
                   "— Ctrl+b passthrough, six spaced labels, paging, Chinese commit,",
                   "preedit anchor, raw cursor editing, single preedit update per edit,",
                   "Unicode emoji, Ctrl+Delete candidate forgetting, Shift raw commit,",
-                  "global language across applications and reactivation")
+                  "global language across applications and reactivation,",
+                  "paging and selecting beyond rank 50")
             ic.DestroyIC()
         except Exception:
             log.seek(0)
