@@ -171,10 +171,10 @@ def local_clipboard(environment):
     """Return the one native clipboard item, not independent text/image slots."""
     if surface_required(environment):
         # wl-clipboard would pop a window and steal focus on every poll, which
-        # cancels an in-progress composition. Read through XWayland instead.
-        silent = _local_clipboard_silently(environment)
-        if silent is not None:
-            return silent
+        # cancels an in-progress composition. If XWayland cannot read the item
+        # (including oversized text), skip this poll instead of falling back
+        # to a visible Wayland surface.
+        return _local_clipboard_silently(environment)
     if wl_paste:
         advertised = clipboard_command([wl_paste, "--list-types"], environment)
         if not advertised or advertised.returncode != 0:
