@@ -1898,7 +1898,8 @@ public:
       return;
     }
     if (!english_ && !s->preedit.empty() && !s->vMode &&
-        key.check(FcitxKey_Delete, KeyState::Ctrl)) {
+        (key.check(FcitxKey_Delete, KeyState::Ctrl) ||
+         key.check(FcitxKey_BackSpace, KeyState::Ctrl))) {
       auto candidates = ic->inputPanel().candidateList();
       auto *list = dynamic_cast<CommonCandidateList *>(candidates.get());
       if (list && list->size()) {

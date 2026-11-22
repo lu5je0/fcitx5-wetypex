@@ -333,13 +333,15 @@ def worker():
             assert commits[-1] == "😂", commits
             # Forget the highlighted candidate, including on a later page.
             # Deletion must not commit text or redraw the unchanged preedit.
-            assert not press(0xffff, 4), "idle Ctrl+Delete was consumed"
+            for forget_key in (0xffff, 0xff08):
+                assert not press(forget_key, 4), "idle forget shortcut was consumed"
             for char in "nihao":
                 assert press(ord(char))
             wait_for(lambda: updates[-1] and updates[-1][0][1] == "你好",
                      "forget test candidates never arrived")
             original_first = updates[-1][0][1]
-            for later_page in (False, True):
+            for forget_key, later_page in ((0xffff, False), (0xffff, True),
+                                         (0xff08, False), (0xff08, True)):
                 if later_page:
                     ic.NextPage()
                     pump(.2)
@@ -350,7 +352,7 @@ def worker():
                 for _ in range(target_index):
                     assert press(0xff54)  # Down highlights the target word.
                 preedit_count = len(client_preedits)
-                assert press(0xffff, 4), "Ctrl+Delete was not consumed"
+                assert press(forget_key, 4), "forget shortcut was not consumed"
                 wait_for(lambda: updates[-1] and
                          updates[-1][0][1] == original_first and
                          all(text != target for _, text in updates[-1]),
@@ -543,7 +545,7 @@ def worker():
             print("PASS:", "Kimpanel (including 中/英 status and click)" if kimpanel else "client UI",
                   "— Ctrl+b passthrough, six spaced labels, paging, Chinese commit,",
                   "preedit anchor, raw cursor editing, single preedit update per edit,",
-                  "Unicode emoji, Ctrl+Delete candidate forgetting, Shift raw commit,",
+                  "Unicode emoji, Ctrl+Delete/Ctrl+Backspace candidate forgetting, Shift raw commit,",
                   "global language across applications and reactivation,",
                   "paging and selecting beyond rank 50")
             ic.DestroyIC()
